@@ -24,6 +24,19 @@ const top = Math.round(m.height * 0.45);
 await img.extract({ left: 0, top, width: m.width, height: m.height - top }).resize(3200, 660, { fit: 'fill' }).webp({ quality: 78, alphaQuality: 85 }).toFile(root + '/assets/img/ribbon-static.webp');
 await ctx.close();
 
+// 2б. Статична стрічка для телефонів: окремий кадр із вузького екрана, щоб лишалась діагональ
+{
+  const c2 = await b.newContext({ viewport: { width: 460, height: 740 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const q = await c2.newPage();
+  await q.goto(base + '/index.html', { waitUntil: 'load' });
+  await q.waitForFunction('window.__vizor && document.getElementById("top").classList.contains("has-helmet")');
+  const png2 = await q.evaluate(() => { window.__vizor.still({ showHelmet: false }); return document.getElementById('scene').toDataURL('image/png'); });
+  const im = sharp(buf(png2)); const mm = await im.metadata();
+  const tp = Math.round(mm.height * 0.45);
+  await im.extract({ left: 0, top: tp, width: mm.width, height: mm.height - tp }).resize(920, 814, { fit: 'fill' }).webp({ quality: 78, alphaQuality: 85 }).toFile(root + '/assets/img/ribbon-static-m.webp');
+  await c2.close();
+}
+
 // 3. OG-картинка 1200×630 з першого екрана
 p = await b.newPage({ viewport: { width: 1600, height: 840 } });
 await p.goto(base + '/index.html', { waitUntil: 'load' });

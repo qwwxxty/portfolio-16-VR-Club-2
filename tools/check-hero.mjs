@@ -54,6 +54,7 @@ for (const [w, h, mobile] of [[375, 740, true], [768, 1024, true], [1440, 900, f
   }
   await p.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' })); await p.waitForTimeout(600);
   const fps = await p.evaluate(() => new Promise(r => { let n = 0; const t0 = performance.now(); (function f() { n++; if (performance.now() - t0 < 3000) requestAnimationFrame(f); else r(Math.round(n / 3)); })(); }));
+  delete worst.minContrastMuted; // альфа canvas не бачить аддитивного світіння; контраст міряє check-contrast.mjs
   console.log(w, JSON.stringify(worst), 'fps', fps, 'errors', errs.length ? errs : 'none');
   await ctx.close();
 }
