@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Службова сторінка (не частина сайту): рендерить шолом на прозорому тлі для постера.
+     Використовується скриптом tools/render-assets.mjs. -->
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>poster</title>
+<link rel="stylesheet" href="../styles.css">
+<style>html,body{margin:0;background:transparent!important}canvas{display:block;width:1200px;height:1200px}</style>
+<script type="importmap">
+{ "imports": { "three": "../assets/vendor/three/build/three.module.min.js", "three/addons/": "../assets/vendor/three/addons/" } }
+</script>
+</head>
+<body>
+<canvas id="c" width="1200" height="1200"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { makeRenderer, setupLook, loadHelmet, readPalette, FOV, CAM_Z, POSTER_SPAN, BASE_ROT } from '../scene.js';
+const q = new URLSearchParams(location.search);
+const canvas = document.getElementById('c');
+const renderer = makeRenderer(canvas, 1);
+renderer.setPixelRatio(1);
+renderer.setSize(1200, 1200, false);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 60);
+camera.position.set(0, 0, CAM_Z);
+setupLook(renderer, scene, readPalette());
+const helmet = await loadHelmet();
+const vh = 2 * CAM_Z * Math.tan(THREE.MathUtils.degToRad(FOV / 2));
+const rig = new THREE.Group();
+rig.scale.setScalar(vh / POSTER_SPAN);
+rig.add(helmet);
+scene.add(rig);
+if (q.has('ry')) helmet.rotation.y = parseFloat(q.get('ry'));
+if (q.has('rx')) helmet.rotation.x = parseFloat(q.get('rx'));
+renderer.render(scene, camera);
+window.__png = canvas.toDataURL('image/png');
+window.__done = true;
+</script>
+</body>
+</html>
