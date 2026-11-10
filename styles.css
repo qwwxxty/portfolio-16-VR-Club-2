@@ -32,7 +32,7 @@
   --nav-h: 60px;
 
   /* Сторона квадрата постера/шолома на першому екрані */
-  --helm: min(88vw, 54svh, 640px);
+  --helm: min(88vw, 48svh, 600px);
 }
 @media (min-width: 768px) {
   :root { --gutter: 32px; --section: 112px; --nav-h: 68px; }
@@ -137,11 +137,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
   position: relative; isolation: isolate; overflow: hidden;
   min-height: max(100svh, 620px);
   display: flex; flex-direction: column; align-items: center;
-  padding: calc(var(--nav-h) + clamp(20px, 5svh, 72px)) var(--gutter) calc(var(--helm) * 0.62);
+  padding: calc(var(--nav-h) + clamp(20px, 5svh, 72px)) var(--gutter) calc(var(--helm) * 0.80);
   text-align: center;
 }
 .hero::after { /* плавний перехід сцени в контент */
-  content: ''; position: absolute; inset: auto 0 0 0; height: 90px; z-index: 3; pointer-events: none;
+  content: ''; position: absolute; inset: auto 0 0 0; height: 28px; z-index: 3; pointer-events: none;
   background: linear-gradient(to top, var(--bg), transparent);
 }
 .hero__canvas, .hero__ribbon, .hero__poster { position: absolute; pointer-events: none; user-select: none; }
@@ -151,7 +151,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   transform: translateX(-50%); transition: opacity .9s ease;
 }
 .hero__poster {
-  z-index: 2; left: 50%; top: calc(100% - var(--helm) * 0.37);
+  z-index: 2; left: 50%; top: calc(100% - var(--helm) * 0.57);
   width: var(--helm); height: var(--helm); transform: translate(-50%, -50%);
   transition: opacity .5s ease;
 }
