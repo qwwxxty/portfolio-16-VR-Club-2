@@ -133,7 +133,6 @@ export async function loadHelmet(pal = readPalette()) {
 /* Стрічка лежить далі від камери, шолом ближче: по глибині вони не перетинаються ніколи. */
 const RIBBON_Z = -3;
 const HELMET_Z = 0.8;
-const GLOW_Z = -1;
 const CYCLE = 10; /* секунд на повний цикл «дихання» стрічки */
 const W = (Math.PI * 2) / CYCLE;
 
@@ -257,26 +256,67 @@ export function makeRibbon(pal, mobile) {
   };
 }
 
-/* М'яке холодне світіння за шоломом: спрайт з аддитивним змішуванням, без постобробки. */
+/* Світіння за шоломом: не одна пляма, а три шари на різній глибині (широкий серпанок, середній ореол,
+   зміщене світле ядро) плюс точкове світло, яке справді освітлює стрічку. Без постобробки. */
 function makeGlow(pal) {
+  /* гаусів спад без видимої межі; дрібний шум прибирає смуги на градієнті */
+  const SIZE = 256;
   const c = document.createElement('canvas');
-  c.width = c.height = 128;
+  c.width = c.height = SIZE;
   const g = c.getContext('2d');
-  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  [[0, 1], [0.2, 0.62], [0.42, 0.24], [0.68, 0.06], [1, 0]].forEach(([o, a]) => grd.addColorStop(o, `rgba(255,255,255,${a})`));
-  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+  const img = g.createImageData(SIZE, SIZE);
+  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
+    const dx = (x + 0.5) / SIZE * 2 - 1, dy = (y + 0.5) / SIZE * 2 - 1;
+    const r = Math.hypot(dx, dy);
+    let a = Math.exp(-r * r * 4.2) * Math.max(0, 1 - r * r * r * r); /* до краю текстури рівно нуль */
+    a = Math.max(0, a + (Math.random() - 0.5) * 0.012 * a ** 0.5);
+    const i = (y * SIZE + x) * 4;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+    img.data[i + 3] = Math.round(a * 255);
+  }
+  g.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: tex, color: pal.accent2, blending: THREE.AdditiveBlending,
-    transparent: true, depthWrite: false, opacity: 0.32, toneMapped: false,
-  }));
-  sprite.renderOrder = 2;
-  return sprite;
+
+  const layer = (color, opacity) => {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, color, blending: THREE.AdditiveBlending,
+      transparent: true, depthWrite: false, opacity, toneMapped: false,
+    }));
+    sp.userData.opacity = opacity;
+    sp.renderOrder = 2;
+    return sp;
+  };
+  /* z, розмір (у сторонах шолома) по x і y, зсув центру, колір, непрозорість */
+  const defs = [
+    { z: -1.9, sx: 2.5, sy: 1.5, ox: 0.0, oy: -0.02, color: pal.accent2, opacity: 0.13 },
+    { z: -1.3, sx: 1.45, sy: 1.25, ox: -0.03, oy: 0.05, color: pal.accent2, opacity: 0.2 },
+    { z: -0.7, sx: 0.8, sy: 0.7, ox: 0.1, oy: 0.12, color: pal.accent2.clone().lerp(pal.text, 0.45), opacity: 0.17 },
+  ];
+  const group = new THREE.Group();
+  const layers = defs.map((d) => { const sp = layer(d.color, d.opacity); group.add(sp); return { sp, d }; });
+  /* справжнє світло від ореолу: підсвічує стрічку й задні краї шолома */
+  const light = new THREE.PointLight(pal.accent2, 5, 7, 2);
+  group.add(light);
+
+  /* cx, cy — центр шолома в площині екрана; px, py — курсор; k — загальна сила (0..1) */
+  function place(cx, cy, side, shrink, t, px, py, k) {
+    for (const { sp, d } of layers) {
+      const f = (CAM_Z - d.z) / CAM_Z;
+      /* шари зсуваються за курсором по-різному: виникає глибина */
+      const par = -d.z * 0.022 * side;
+      sp.position.set((cx + d.ox * side * shrink - px * par) * f, (cy + d.oy * side * shrink + py * par * 0.6) * f, d.z);
+      sp.scale.set(d.sx * side * f * shrink, d.sy * side * f * shrink, 1);
+      sp.material.opacity = d.opacity * k * (1 + 0.1 * Math.sin(W * t + d.z * 2.0));
+    }
+    light.position.set(cx * 1.12, (cy + 0.12 * side) * 1.12, -1.2);
+    light.intensity = 3.4 * k * side * side / 3.2; /* на менших екранах шолом менший, світла теж менше */
+  }
+  return { group, place };
 }
 
 /* ---------- Сцена першого екрана ---------- */
-export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, onHelmet, onError }) {
+export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, onHelmet, onError, onContextLost }) {
   const pal = readPalette();
   const renderer = makeRenderer(canvas, mobile ? 1.5 : 2);
   const scene = new THREE.Scene();
@@ -287,7 +327,7 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
   const ribbon = makeRibbon(pal, mobile);
   scene.add(ribbon.mesh);
   const glow = makeGlow(pal);
-  scene.add(glow);
+  scene.add(glow.group);
 
   const rig = new THREE.Group();
   scene.add(rig);
@@ -296,7 +336,6 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
 
   const VH = visibleHeight();
   const NEAR = (CAM_Z - HELMET_Z) / CAM_Z;  /* шолом ближче до камери: компенсуємо перспективу */
-  const GLOW_K = (CAM_Z - GLOW_Z) / CAM_Z;
   const state = { w: 0, h: 0, baseX: 0, baseY: 0, scale: 1, pitchFix: 0, side: 1 };
   const L = { VW: 1, VH, hx: 0, hy: 0, side: 1, top: 0 };
 
@@ -337,11 +376,13 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
     window.addEventListener('pointermove', onPointer, { passive: true });
   }
 
+  /* Прогрес прокрутки рахуємо в кожному кадрі з актуальної висоти першого екрана.
+     Раніше він рахувався один раз до першого layout() і без події scroll лишався рівним 1:
+     після оновлення сторінки не з самого верху сцена ставала прозорою. */
   let scrollP = 0;
-  function onScroll() {
-    scrollP = Math.min(1, Math.max(0, window.scrollY / Math.max(1, state.h)));
+  function readScroll() {
+    scrollP = state.h > 1 ? Math.min(1, Math.max(0, window.scrollY / state.h)) : 0;
   }
-  window.addEventListener('scroll', onScroll, { passive: true });
 
   let running = false, visible = true, raf = 0, first = true;
   const clock = new THREE.Clock();
@@ -364,10 +405,8 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
       helmet.rotation.y = BASE_ROT.y + Math.sin(t * 0.45) * 0.06 * ease + px * 0.1 + s * 1.4;
       helmet.rotation.z = BASE_ROT.z + Math.sin(t * 0.7 + 1.0) * 0.015 * ease;
     }
-    /* Світіння за шоломом їде разом із ним. */
-    glow.position.set(state.baseX * GLOW_K, (state.baseY + lift) * GLOW_K, GLOW_Z);
-    glow.scale.setScalar(state.side * 1.45 * GLOW_K * shrink);
-    glow.material.opacity = 0.32 * (1 - s);
+    /* Світіння за шоломом їде разом із ним і гасне при прокрутці. */
+    glow.place(state.baseX, state.baseY + lift, state.side, shrink, t, px, py, 1 - s);
     /* Тінь на стрічці за шоломом: слабшає, коли шолом іде вгору. */
     ribbon.setShadow(state.baseX + 0.03 * state.side, state.baseY + lift - 0.1 * state.side + s * 0.8,
       0.36 * state.side, 0.22 * state.side, 0.4 * (helmet ? 1 : 0.6) * (1 - s));
@@ -379,6 +418,7 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
     const dt = Math.min(clock.getDelta(), 0.05);
     time += dt;
     layout();
+    readScroll();
 
     const k = 1 - Math.exp(-dt * 4);
     pointer.x += (pointer.tx - pointer.x) * k;
@@ -410,9 +450,12 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
     update();
   }, { threshold: 0.02 }).observe(hero);
   document.addEventListener('visibilitychange', update);
-  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); onError && onError(new Error('context lost')); });
+  /* Якщо браузер забрав WebGL-контекст (сон, нестача пам'яті GPU), не лишаємо порожнє місце: повертаємо постер. */
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault(); running = false; if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    onContextLost && onContextLost();
+  });
 
-  onScroll();
   update();
 
   loadHelmet(pal).then((pivot) => {
@@ -424,7 +467,7 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
   }).catch((err) => onError && onError(err));
 
   return {
-    renderer, scene, camera, rig, glow, ribbon: ribbon.mesh,
+    renderer, scene, camera, rig, glow: glow.group, ribbon: ribbon.mesh,
     get running() { return running; },
     get time() { return time; },
     /* Запас по глибині між найближчою точкою стрічки і найдальшою точкою шолома (одиниці сцени). */
@@ -434,7 +477,8 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
       running = false; if (raf) { cancelAnimationFrame(raf); raf = 0; }
       state.w = 0; layout();
       place(t, 0, 0, 0, 0);
-      ribbon.mesh.visible = showRibbon; rig.visible = showHelmet; glow.visible = showHelmet;
+      canvas.style.opacity = '1';
+      ribbon.mesh.visible = showRibbon; rig.visible = showHelmet; glow.group.visible = showHelmet;
       renderer.render(scene, camera);
     },
   };

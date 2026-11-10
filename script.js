@@ -192,6 +192,10 @@
         canvas: canvas, hero: hero, anchor: $('#poster'), limitEl: $('.btn-hero'), mobile: mobile,
         onFirstFrame: function () { hero.classList.add('is-live'); },
         onHelmet: function () { hero.classList.add('has-helmet'); },
+        onContextLost: function () {
+          /* WebGL-контекст втрачено: показуємо статичний постер і стрічку замість порожнього canvas. */
+          hero.classList.remove('is-live', 'has-helmet'); hero.classList.add('is-static');
+        },
         onError: function (err) {
           /* Модель не завантажилась: лишаємо постер, стрічка продовжує жити. */
           if (window.console) console.warn('VIZOR: 3D-шолом недоступний, показуємо постер.', err && err.message);
