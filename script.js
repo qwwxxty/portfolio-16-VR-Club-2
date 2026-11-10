@@ -22,11 +22,52 @@
 
   var hero = $('#top');
   if ('IntersectionObserver' in window) {
-    /* Шапка отримує тло й кнопку «Забронювати», коли перший екран майже прокручено. */
+    /* Кнопка «Забронювати» в шапці з'являється, коли перший екран майже прокручено. */
     new IntersectionObserver(function (en) {
       nav.classList.toggle('is-stuck', !en[0].isIntersecting);
     }, { rootMargin: '-45% 0px 0px 0px', threshold: 0 }).observe(hero);
   }
+
+  /* ---------- Перший екран при прокрутці ---------- */
+  /* Текст зникає і їде вгору на першій половині екрана. Де є CSS scroll-driven animations, рух робить CSS
+     (styles.css, @keyframes hero-out); тут — фолбек на requestAnimationFrame з тими самими відрізками.
+     Окремо від способу анімації: кнопка, що вже зникла, не клікається і не ловить фокус. */
+  var heroBtn = $('.btn-hero');
+  var outItems = [
+    { el: $('.hero__content > .pill'), from: 0, to: 0.38 },
+    { el: $('#hero-title'), from: 0.03, to: 0.42 },
+    { el: $('.hero__sub'), from: 0.06, to: 0.46 },
+    { el: heroBtn, from: 0.09, to: 0.50 }
+  ];
+  var cssScroll = !!(window.CSS && CSS.supports && CSS.supports('animation-timeline: scroll()'));
+  var jsScroll = !cssScroll && !reduced;
+  var scrollTick = 0;
+  function onScrollFrame() {
+    scrollTick = 0;
+    var y = window.scrollY || window.pageYOffset || 0;
+    var vh = window.innerHeight || 1;
+    nav.classList.toggle('is-scrolled', y > 12);
+    /* кнопка вважається зниклою, коли її прозорість упала приблизно до 0.15 */
+    var gone = !reduced && y / vh > 0.36;
+    if (gone !== heroBtn.classList.contains('is-gone')) {
+      heroBtn.classList.toggle('is-gone', gone);
+      if (gone) { heroBtn.setAttribute('tabindex', '-1'); heroBtn.setAttribute('aria-hidden', 'true'); }
+      else { heroBtn.removeAttribute('tabindex'); heroBtn.removeAttribute('aria-hidden'); }
+    }
+    if (jsScroll) {
+      outItems.forEach(function (it) {
+        var t = Math.min(1, Math.max(0, (y / vh - it.from) / (it.to - it.from)));
+        var e = 1 - (1 - t) * (1 - t); /* ease-out за прогресом */
+        it.el.style.opacity = String(1 - e);
+        it.el.style.transform = e ? 'translate3d(0,' + (-60 * e).toFixed(1) + 'px,0)' : '';
+        it.el.style.visibility = t >= 1 ? 'hidden' : '';
+      });
+    }
+  }
+  function queueScroll() { if (!scrollTick) scrollTick = requestAnimationFrame(onScrollFrame); }
+  window.addEventListener('scroll', queueScroll, { passive: true });
+  window.addEventListener('resize', queueScroll);
+  onScrollFrame();
 
   /* ---------- М'яка поява блоків ---------- */
   var reveals = $$('.reveal');

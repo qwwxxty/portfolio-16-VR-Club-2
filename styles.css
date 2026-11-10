@@ -8,6 +8,7 @@
   --muted: #A1ACB9;     /* oklch(0.740 0.022 250) */
   --accent: #F38230;    /* oklch(0.720 0.165 52)  — помаранчевий анод, головна кнопка */
   --accent-2: #5BBEED;  /* oklch(0.760 0.115 232) — крижаний блік, деталі */
+  --glow: #1387D8;      /* похідний: глибший відтінок --accent-2, лише для світіння за шоломом */
 
   --line: color-mix(in oklab, var(--muted) 22%, transparent);
   --line-strong: color-mix(in oklab, var(--muted) 42%, transparent);
@@ -22,7 +23,7 @@
   --fs-base: 1.0625rem;
   --fs-lg: 1.375rem;
   --fs-xl: clamp(1.75rem, 1.2rem + 2.4vw, 2.75rem);
-  --fs-hero: clamp(2.25rem, 0.9rem + 6.4vw, 5.5rem);
+  --fs-hero: min(clamp(2.25rem, 0.9rem + 6.4vw, 5.5rem), 9.4svh);
 
   --radius: 18px;
   --radius-sm: 12px;
@@ -73,7 +74,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid transparent;
   transition: background-color .25s, border-color .25s;
 }
-.nav.is-stuck, .nav.is-open {
+.nav.is-scrolled, .nav.is-stuck, .nav.is-open {
   background: color-mix(in oklab, var(--bg) 82%, transparent);
   -webkit-backdrop-filter: blur(16px) saturate(1.3); backdrop-filter: blur(16px) saturate(1.3);
   border-bottom-color: var(--line);
@@ -137,7 +138,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   position: relative; isolation: isolate; overflow: hidden;
   min-height: max(100svh, 620px);
   display: flex; flex-direction: column; align-items: center;
-  padding: calc(var(--nav-h) + clamp(20px, 5svh, 72px)) var(--gutter) calc(var(--helm) * 0.80);
+  padding: calc(var(--nav-h) + clamp(36px, 8svh, 96px)) var(--gutter) calc(var(--helm) * 0.84);
   text-align: center;
 }
 .hero::after { /* плавний перехід сцени в контент */
@@ -155,20 +156,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
   width: var(--helm); height: var(--helm); transform: translate(-50%, -50%);
   transition: opacity .5s ease;
 }
-.hero__glow { /* світіння за шоломом для постера і статичного режиму; у живій сцені його малюють спрайти */
-  position: absolute; z-index: 1; pointer-events: none; left: 50%; top: calc(100% - var(--helm) * 0.57);
-  width: calc(var(--helm) * 2.5); height: calc(var(--helm) * 1.5); transform: translate(-50%, -50%);
-  background:
-    radial-gradient(closest-side at 54% 42%,
-      color-mix(in oklab, color-mix(in oklab, var(--accent-2) 55%, var(--text)) 16%, transparent) 0%,
-      color-mix(in oklab, var(--accent-2) 6%, transparent) 22%, transparent 34%),
-    radial-gradient(29% 42% at 49% 47%,
-      color-mix(in oklab, var(--accent-2) 20%, transparent) 0%,
-      color-mix(in oklab, var(--accent-2) 9%, transparent) 45%, transparent 100%),
-    radial-gradient(closest-side,
-      color-mix(in oklab, var(--accent-2) 13%, transparent) 0%,
-      color-mix(in oklab, var(--accent-2) 6%, transparent) 40%,
-      color-mix(in oklab, var(--accent-2) 1.5%, transparent) 72%, transparent 100%);
+.hero__glow { /* світіння за шоломом для постера і статичного режиму; у живій сцені його малює шейдер */
+  position: absolute; z-index: 1; pointer-events: none; left: 50%; top: calc(100% - var(--helm) * 0.60);
+  width: calc(var(--helm) * 2.1); aspect-ratio: 1; transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side,
+    color-mix(in oklab, color-mix(in oklab, var(--glow) 80%, var(--accent-2)) 30%, transparent) 0%,
+    color-mix(in oklab, var(--glow) 17%, transparent) 30%,
+    color-mix(in oklab, var(--glow) 5%, transparent) 58%, transparent 80%);
+  filter: blur(70px);
+  /* зверху гасимо до нуля біля низу кнопки: кнопка і текст на чистому тлі */
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(50% - var(--helm) * 0.26), #000 calc(50% + var(--helm) * 0.08));
+  mask-image: linear-gradient(to bottom, transparent calc(50% - var(--helm) * 0.26), #000 calc(50% + var(--helm) * 0.08));
   transition: opacity .9s ease;
 }
 .hero.is-live .hero__glow { opacity: 0; }
@@ -186,17 +184,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pill__ico { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in oklab, var(--accent-2) 22%, transparent); color: var(--accent-2); }
 .pill__ico svg { width: 12px; height: 12px; }
 .hero h1 {
-  margin-top: clamp(18px, 3svh, 28px);
+  margin-top: clamp(16px, 2.4svh, 24px);
   font-family: var(--font-display); font-weight: 600; font-size: var(--fs-hero);
   line-height: 1.04; letter-spacing: -0.035em; text-wrap: balance;
+}
+/* градієнт живе на внутрішній обгортці, а не на h1: інакше він проявляє прихований текст для скринрідерів */
+.hero__title {
+  display: block; padding-bottom: 0.08em;
   background: linear-gradient(180deg, var(--text) 30%, color-mix(in oklab, var(--accent-2) 48%, var(--text)) 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
-  padding-bottom: 0.08em;
 }
-.hero h1 span { display: block; }
+.hero__title span { display: block; }
 .hero__sub { margin-top: clamp(12px, 2svh, 20px); max-width: 34em; color: var(--muted); font-size: var(--fs-base); text-wrap: balance; }
 .btn-hero {
-  margin-top: clamp(20px, 3.4svh, 34px);
+  margin-top: clamp(18px, 2.8svh, 28px);
   display: inline-flex; align-items: center; gap: 14px; min-height: 56px; padding: 6px 6px 6px 26px;
   border-radius: 999px; background: var(--text); color: var(--bg); text-decoration: none;
   font-weight: 600; font-size: var(--fs-base);
@@ -208,10 +209,28 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: grid; place-items: center; transition: transform .25s ease;
 }
 .btn-hero__ico svg { width: 18px; height: 18px; }
-.btn-hero:hover { transform: translateY(-2px); }
+.btn-hero:hover { box-shadow: 0 14px 44px -10px color-mix(in oklab, var(--accent-2) 65%, transparent); }
+.btn-hero.is-gone { pointer-events: none; }
 .btn-hero:hover .btn-hero__ico { transform: translateX(3px); }
 @media (min-width: 768px) {
   .hero__sub { font-size: var(--fs-lg); line-height: 1.4; }
+}
+
+/* Текст першого екрана при прокрутці: зникає і м'яко їде вгору, прив'язано до скролу.
+   Тільки transform і opacity. Каскад: плашка трохи раніше, кнопка останньою.
+   Без підтримки animation-timeline те саме робить script.js через requestAnimationFrame. */
+@keyframes hero-out { to { opacity: 0; transform: translateY(-60px); visibility: hidden; } }
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: scroll()) {
+    .hero__content > * {
+      animation: hero-out ease-out both;
+      animation-timeline: scroll(root block);
+    }
+    .hero__content > .pill { animation-range: 0px 38svh; }
+    .hero__content > h1 { animation-range: 3svh 42svh; }
+    .hero__content > .hero__sub { animation-range: 6svh 46svh; }
+    .hero__content > .btn-hero { animation-range: 9svh 50svh; }
+  }
 }
 
 /* ---------- Секції ---------- */

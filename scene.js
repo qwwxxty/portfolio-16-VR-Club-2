@@ -117,9 +117,9 @@ export async function loadHelmet(pal = readPalette()) {
           normal = normalize(mix(normal, normalize(vzGlassN), vzGlass * 0.94));`)
         /* тонкий світлий контур по краях, сильніший згори: шолом відділяється від тла */
         .replace('#include <opaque_fragment>', `
-          float vzRim = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 3.5);
+          float vzRim = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 6.0);
           vzRim *= smoothstep(-0.4, 0.55, normal.y);
-          outgoingLight += ${rimGlsl} * vzRim * 0.5;
+          outgoingLight += ${rimGlsl} * vzRim * 0.45;
           #include <opaque_fragment>`);
     };
   });
@@ -256,61 +256,71 @@ export function makeRibbon(pal, mobile) {
   };
 }
 
-/* Світіння за шоломом: не одна пляма, а три шари на різній глибині (широкий серпанок, середній ореол,
-   зміщене світле ядро) плюс точкове світло, яке справді освітлює стрічку. Без постобробки. */
+/* Світіння за шоломом: один шейдерний квад з аддитивним змішуванням, без постобробки.
+   Альфа спадає за Гаусом і доходить до нуля задовго до краю квада, тож межі не видно ніде.
+   Зверху світіння гаситься біля низу кнопки: кнопка й текст лишаються на чистому тлі. */
+const GLOW_Z = -1.5;
+const GLOW_PEAK = 0.18; /* найбільша непрозорість у центрі */
 function makeGlow(pal) {
-  /* гаусів спад без видимої межі; дрібний шум прибирає смуги на градієнті */
-  const SIZE = 256;
-  const c = document.createElement('canvas');
-  c.width = c.height = SIZE;
-  const g = c.getContext('2d');
-  const img = g.createImageData(SIZE, SIZE);
-  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
-    const dx = (x + 0.5) / SIZE * 2 - 1, dy = (y + 0.5) / SIZE * 2 - 1;
-    const r = Math.hypot(dx, dy);
-    let a = Math.exp(-r * r * 4.2) * Math.max(0, 1 - r * r * r * r); /* до краю текстури рівно нуль */
-    a = Math.max(0, a + (Math.random() - 0.5) * 0.012 * a ** 0.5);
-    const i = (y * SIZE + x) * 4;
-    img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
-    img.data[i + 3] = Math.round(a * 255);
-  }
-  g.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-
-  const layer = (color, opacity) => {
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: tex, color, blending: THREE.AdditiveBlending,
-      transparent: true, depthWrite: false, opacity, toneMapped: false,
-    }));
-    sp.userData.opacity = opacity;
-    sp.renderOrder = 2;
-    return sp;
-  };
-  /* z, розмір (у сторонах шолома) по x і y, зсув центру, колір, непрозорість */
-  const defs = [
-    { z: -1.9, sx: 2.5, sy: 1.5, ox: 0.0, oy: -0.02, color: pal.accent2, opacity: 0.13 },
-    { z: -1.3, sx: 1.45, sy: 1.25, ox: -0.03, oy: 0.05, color: pal.accent2, opacity: 0.2 },
-    { z: -0.7, sx: 0.8, sy: 0.7, ox: 0.1, oy: 0.12, color: pal.accent2.clone().lerp(pal.text, 0.45), opacity: 0.17 },
-  ];
+  /* глибший і насиченіший відтінок --accent-2 (у CSS це --glow) */
+  const hsl = {}; pal.accent2.getHSL(hsl);
+  const deep = new THREE.Color().setHSL(hsl.h + 0.015, Math.min(1, hsl.s * 1.05), hsl.l * 0.72);
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, toneMapped: false,
+    /* чисте додавання кольору поверх тла сторінки; альфу canvas не чіпаємо */
+    blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+    blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
+    uniforms: {
+      uDeep: { value: deep.clone().convertLinearToSRGB() },
+      uCore: { value: pal.accent2.clone().convertLinearToSRGB() },
+      uK: { value: GLOW_PEAK }, uTop: { value: 10 }, uFade: { value: 1 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv; varying float vY;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vY = wp.y;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader: /* glsl */ `
+      precision highp float;
+      uniform vec3 uDeep; uniform vec3 uCore;
+      uniform float uK; uniform float uTop; uniform float uFade;
+      varying vec2 vUv; varying float vY;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      void main() {
+        vec2 d = (vUv - 0.5) * 2.0;
+        float r2 = dot(d, d);
+        /* Гаус + вікно, яке дає рівно нуль уже на 85 % радіуса */
+        float a = exp(-r2 * 7.0) * smoothstep(0.85, 0.35, sqrt(r2));
+        /* до центру трохи світліше, до країв — глибокий холодний тон, що тане в тлі */
+        vec3 col = mix(uDeep, uCore, exp(-r2 * 30.0) * 0.5);
+        a *= uK * smoothstep(uTop, uTop - uFade, vY);
+        /* дизеринг проти смуг на плавному градієнті */
+        vec3 outc = col * a + (hash(gl_FragCoord.xy) - 0.5) / 255.0;
+        gl_FragColor = vec4(max(outc, 0.0), 0.0);
+      }`,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+  mesh.renderOrder = 2;
+  mesh.frustumCulled = false;
   const group = new THREE.Group();
-  const layers = defs.map((d) => { const sp = layer(d.color, d.opacity); group.add(sp); return { sp, d }; });
-  /* справжнє світло від ореолу: підсвічує стрічку й задні краї шолома */
-  const light = new THREE.PointLight(pal.accent2, 5, 7, 2);
+  group.add(mesh);
+  /* справжнє світло від ореолу: ледь підсвічує стрічку за шоломом */
+  const light = new THREE.PointLight(deep, 2.4, 7, 2);
   group.add(light);
+  const f = (CAM_Z - GLOW_Z) / CAM_Z;
 
-  /* cx, cy — центр шолома в площині екрана; px, py — курсор; k — загальна сила (0..1) */
-  function place(cx, cy, side, shrink, t, px, py, k) {
-    for (const { sp, d } of layers) {
-      const f = (CAM_Z - d.z) / CAM_Z;
-      /* шари зсуваються за курсором по-різному: виникає глибина */
-      const par = -d.z * 0.022 * side;
-      sp.position.set((cx + d.ox * side * shrink - px * par) * f, (cy + d.oy * side * shrink + py * par * 0.6) * f, d.z);
-      sp.scale.set(d.sx * side * f * shrink, d.sy * side * f * shrink, 1);
-      sp.material.opacity = d.opacity * k * (1 + 0.1 * Math.sin(W * t + d.z * 2.0));
-    }
-    light.position.set(cx * 1.12, (cy + 0.12 * side) * 1.12, -1.2);
-    light.intensity = 3.4 * k * side * side / 3.2; /* на менших екранах шолом менший, світла теж менше */
+  /* cx, cy — центр шолома в площині екрана; top — низ кнопки; k — сила (0..1) */
+  function place(cx, cy, side, shrink, t, px, py, k, top) {
+    mesh.position.set((cx - px * 0.03 * side) * f, (cy - 0.03 * side + py * 0.02 * side) * f, GLOW_Z);
+    mesh.scale.setScalar(3.1 * side * f * shrink); /* видимий ореол ≈ 2–2.5 ширини шолома */
+    mat.uniforms.uK.value = GLOW_PEAK * k * (1 + 0.06 * Math.sin(W * t));
+    mat.uniforms.uTop.value = top * f;
+    mat.uniforms.uFade.value = 0.3 * side * f;
+    light.position.set(cx * 1.12, (cy + 0.1 * side) * 1.12, -1.2);
+    light.intensity = 2.4 * k * side * side / 3.2;
   }
   return { group, place };
 }
@@ -336,8 +346,8 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
 
   const VH = visibleHeight();
   const NEAR = (CAM_Z - HELMET_Z) / CAM_Z;  /* шолом ближче до камери: компенсуємо перспективу */
-  const state = { w: 0, h: 0, baseX: 0, baseY: 0, scale: 1, pitchFix: 0, side: 1 };
-  const L = { VW: 1, VH, hx: 0, hy: 0, side: 1, top: 0 };
+  const state = { w: 0, h: 0, baseX: 0, baseY: 0, scale: 1, pitchFix: 0, side: 1, unit: 0.004 };
+  const L = { VW: 1, VH, hx: 0, hy: 0, side: 1, top: 0, glowTop: 0 };
 
   function layout() {
     const rect = hero.getBoundingClientRect();
@@ -349,6 +359,7 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     const unit = VH / h; // одиниць сцени в одному CSS-пікселі
+    state.unit = unit;
 
     /* Шолом стає точно на місце постера. */
     const a = anchor.getBoundingClientRect();
@@ -361,10 +372,12 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
     state.pitchFix = Math.atan2(state.baseY, CAM_Z);
 
     /* Стрічка не заходить під кнопку й текст: верхня межа — низ кнопки мінус 3.5 % висоти. */
-    const lim = limitEl.getBoundingClientRect();
+    /* позицію кнопки беремо з розмітки, без урахування її анімації при прокрутці */
+    const limBottom = limitEl.offsetTop + limitEl.offsetHeight + (limitEl.offsetParent ? limitEl.offsetParent.offsetTop : 0);
     L.VW = VH * camera.aspect;
     L.hx = state.baseX; L.hy = state.baseY; L.side = state.side;
-    L.top = (h / 2 - (lim.bottom - rect.top)) * unit - 0.035 * VH;
+    L.top = (h / 2 - limBottom) * unit - 0.035 * VH;
+    L.glowTop = (h / 2 - limBottom) * unit - 0.008 * VH;
   }
 
   const pointer = { x: 0, y: 0, tx: 0, ty: 0 };
@@ -391,22 +404,23 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
   /* Розставляє все для моменту t; lift — наскільки шолом піднявся над базовою точкою. */
   function place(t, s, ease, px, py) {
     ribbon.update(t, L);
-    ribbon.mesh.position.y = -s * 0.8; /* при прокрутці стрічка йде вниз, шолом угору */
+    ribbon.mesh.position.y = -s * 0.5; /* при прокрутці стрічка йде вниз, шолом угору */
 
     const bob = Math.sin(t * 0.9) * 0.035 * ease * state.scale;
-    const lift = bob + s * 1.1;
+    /* шолом піднімається рівно на ті самі 60 px, що й текст: вони йдуть разом і не наїжджають одне на одного */
+    const lift = bob + s * 60 * state.unit;
     const shrink = 1 - s * 0.5;
     if (helmet) {
       /* Шолом не йде вглиб крізь стрічку: він зменшується й піднімається, лишаючись перед нею. */
       rig.scale.setScalar(state.scale * NEAR * shrink);
       rig.position.set(state.baseX * NEAR, (state.baseY + lift) * NEAR, HELMET_Z);
       /* Покачування + кілька градусів за курсором + поворот при прокрутці. */
-      helmet.rotation.x = BASE_ROT.x + state.pitchFix + Math.sin(t * 0.6) * 0.03 * ease + py * 0.06 + s * 0.3;
-      helmet.rotation.y = BASE_ROT.y + Math.sin(t * 0.45) * 0.06 * ease + px * 0.1 + s * 1.4;
+      helmet.rotation.x = BASE_ROT.x + state.pitchFix + Math.sin(t * 0.6) * 0.03 * ease + py * 0.06 + s * 0.18;
+      helmet.rotation.y = BASE_ROT.y + Math.sin(t * 0.45) * 0.06 * ease + px * 0.1 - s * 0.35;
       helmet.rotation.z = BASE_ROT.z + Math.sin(t * 0.7 + 1.0) * 0.015 * ease;
     }
     /* Світіння за шоломом їде разом із ним і гасне при прокрутці. */
-    glow.place(state.baseX, state.baseY + lift, state.side, shrink, t, px, py, 1 - s);
+    glow.place(state.baseX, state.baseY + lift, state.side, shrink, t, px, py, 1 - s, L.glowTop);
     /* Тінь на стрічці за шоломом: слабшає, коли шолом іде вгору. */
     ribbon.setShadow(state.baseX + 0.03 * state.side, state.baseY + lift - 0.1 * state.side + s * 0.8,
       0.36 * state.side, 0.22 * state.side, 0.4 * (helmet ? 1 : 0.6) * (1 - s));
@@ -425,9 +439,11 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
     pointer.y += (pointer.ty - pointer.y) * k;
     if (helmet) helmetIn = Math.min(1, helmetIn + dt * 0.8);
     const ease = helmetIn * helmetIn * (3 - 2 * helmetIn);
-    const s = scrollP * scrollP * (3 - 2 * scrollP);
+    /* Той самий відрізок і те саме пом'якшення (ease-out), що й у тексту: шолом відходить, поки текст зникає. */
+    const sp = Math.min(1, scrollP / 0.5);
+    const s = 1 - (1 - sp) * (1 - sp);
     place(time, s, ease, pointer.x, pointer.y);
-    canvas.style.opacity = String(1 - Math.min(1, Math.max(0, (scrollP - 0.55) / 0.4)));
+    canvas.style.opacity = String(1 - Math.min(1, Math.max(0, (scrollP - 0.5) / 0.4)));
 
     renderer.render(scene, camera);
     if (first) { first = false; onFirstFrame && onFirstFrame(); }
