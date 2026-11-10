@@ -155,6 +155,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
   width: var(--helm); height: var(--helm); transform: translate(-50%, -50%);
   transition: opacity .5s ease;
 }
+.hero__glow { /* світіння за шоломом для постера і статичного режиму; у живій сцені його малює спрайт */
+  position: absolute; z-index: 1; pointer-events: none; left: 50%; top: calc(100% - var(--helm) * 0.57);
+  width: calc(var(--helm) * 1.45); aspect-ratio: 1; transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side,
+    color-mix(in oklab, var(--accent-2) 32%, transparent) 0%,
+    color-mix(in oklab, var(--accent-2) 20%, transparent) 20%,
+    color-mix(in oklab, var(--accent-2) 8%, transparent) 42%,
+    color-mix(in oklab, var(--accent-2) 2%, transparent) 68%, transparent 100%);
+  transition: opacity .9s ease;
+}
+.hero.is-live .hero__glow { opacity: 0; }
 .hero.is-live .hero__canvas { opacity: 1; transition: opacity .9s ease; }
 .hero.is-live .hero__ribbon { opacity: 0; }
 .hero.has-helmet .hero__poster { opacity: 0; }

@@ -189,7 +189,7 @@
     var mobile = window.matchMedia('(max-width: 767px), (pointer: coarse)').matches;
     import('./scene.js').then(function (mod) {
       window.__vizor = mod.initHero({
-        canvas: canvas, hero: hero, anchor: $('#poster'), mobile: mobile,
+        canvas: canvas, hero: hero, anchor: $('#poster'), limitEl: $('.btn-hero'), mobile: mobile,
         onFirstFrame: function () { hero.classList.add('is-live'); },
         onHelmet: function () { hero.classList.add('has-helmet'); },
         onError: function (err) {
