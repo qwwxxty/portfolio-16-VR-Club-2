@@ -28,7 +28,7 @@
 
 2. У репозиторії: Settings → Pages → Source: «Deploy from a branch», гілка `main`, тека `/ (root)` → Save.
 3. За хвилину-дві сайт буде на `https://<логін>.github.io/<репозиторій>/`. Усі шляхи відносні, тож підтека не заважає.
-4. Замініть `https://example.com/` на цю адресу в `index.html` (canonical, `og:url`, `og:image`, JSON-LD).
+4. Адресу сайту вже прописано в `index.html` (canonical, `og:url`, `og:image`, JSON-LD): https://qwwxxty.github.io/portfolio-16-VR-Club-2/
 
 Netlify: перетягніть теку в Netlify Drop або підключіть репозиторій, команда збирання не потрібна.
 
@@ -37,7 +37,7 @@ Netlify: перетягніть теку в Netlify Drop або підключі
 
 | Що | Де |
 |---|---|
-| Адреса сайту `https://example.com/` | `index.html`: canonical, `og:url`, `og:image`, JSON-LD (`url`, `image`) |
+| Адреса сайту (зараз `https://qwwxxty.github.io/portfolio-16-VR-Club-2/`) | `index.html`: canonical, `og:url`, `og:image`, JSON-LD (`url`, `image`) — міняти лише при переїзді на свій домен |
 | Телефон `+380 00 000 00 00` | `index.html`: два посилання `tel:+380000000000` (контакти й кнопка «Подзвонити»), текст номера, JSON-LD `telephone` |
 | Telegram `https://t.me/` | `index.html`: кнопка у формі, рядок у контактах, JSON-LD `sameAs` |
 | Instagram `https://instagram.com/` | `index.html`: рядок у контактах, JSON-LD `sameAs` |
