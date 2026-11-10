@@ -158,6 +158,8 @@ export function makeRibbon(pal, mobile) {
   const rimCol = pal.text.clone().lerp(pal.accent2, 0.55);
   const shadow = { value: new THREE.Vector4(0, 0, 1, 1) };
   const shadowK = { value: 0 };
+  const inner = { value: new THREE.Vector4(0, 0, 1, 0) };
+  const innerCol = glowColor();
   const mat = new THREE.MeshPhysicalMaterial({
     color: front, metalness: 0.92, roughness: 0.22,
     clearcoat: 1, clearcoatRoughness: 0.18, envMapIntensity: 1.0,
@@ -166,13 +168,15 @@ export function makeRibbon(pal, mobile) {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uShadow = shadow;
     shader.uniforms.uShadowK = shadowK;
+    shader.uniforms.uInner = inner;
+    shader.uniforms.uInnerCol = { value: innerCol };
     shader.uniforms.uBack = { value: backCol };
     shader.uniforms.uRim = { value: rimCol };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec2 vzXY;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvzXY = position.xy;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vzXY;\nuniform vec4 uShadow;\nuniform float uShadowK;\nuniform vec3 uBack;\nuniform vec3 uRim;')
+      .replace('#include <common>', '#include <common>\nvarying vec2 vzXY;\nuniform vec4 uShadow;\nuniform float uShadowK;\nuniform vec3 uBack;\nuniform vec3 uRim;\nuniform vec4 uInner;\nuniform vec3 uInnerCol;')
       .replace('#include <color_fragment>', '#include <color_fragment>\nif (!gl_FrontFacing) diffuseColor.rgb = uBack;')
       .replace('#include <opaque_fragment>', `
         /* френель: тонке холодне світіння на згинах і краях, щоб силует читався на темному */
@@ -181,6 +185,9 @@ export function makeRibbon(pal, mobile) {
         /* м'яка тінь від шолома на стрічці за ним */
         vec2 vzD = (vzXY - uShadow.xy) / uShadow.zw;
         outgoingLight *= 1.0 - uShadowK * exp(-dot(vzD, vzD));
+        /* світіння зсередини біля шолома: згасає за Гаусом уздовж стрічки */
+        vec2 vzG = (vzXY - uInner.xy) / uInner.z;
+        outgoingLight += uInnerCol * uInner.w * exp(-dot(vzG, vzG) * 2.2);
         #include <opaque_fragment>`);
   };
 
@@ -253,27 +260,34 @@ export function makeRibbon(pal, mobile) {
     mesh, update,
     setShadow(x, y, rx, ry, k) { shadow.value.set(x, y, rx, ry); shadowK.value = k; },
     maxWorldZ() { return RIBBON_Z + maxZ * depthScale; },
+    /* центр стрічки за шоломом (площина екрана) */
+    mid() { return ctrl[3]; },
+    /* стрічка біля шолома світиться зсередини: x, y центру, радіус, сила */
+    setGlow(x, y, r, k) { inner.value.set(x, y, r, k); },
   };
 }
 
-/* Світіння за шоломом: один шейдерний квад з аддитивним змішуванням, без постобробки.
+/* Світіння за шоломом: один шейдерний квад зі звичайним (не аддитивним) змішуванням, без постобробки.
+   Дві складові: кругла пляма за шоломом і витягнута вздовж стрічки, у 1.5 раза слабша.
    Альфа спадає за Гаусом і доходить до нуля задовго до краю квада, тож межі не видно ніде.
    Зверху світіння гаситься біля низу кнопки: кнопка й текст лишаються на чистому тлі. */
 const GLOW_Z = -1.5;
-const GLOW_PEAK = 0.18; /* найбільша непрозорість у центрі */
+const GLOW_PEAK = 0.44;            /* непрозорість у центрі плями за шоломом */
+const GLOW_BAND = GLOW_PEAK / 1.5; /* вздовж стрічки */
+const GLOW_W = 4.2, GLOW_H = 2.4;  /* розмір квада в сторонах постера шолома */
+export function glowColor() {
+  const css = getComputedStyle(document.documentElement);
+  return new THREE.Color(css.getPropertyValue('--glow').trim());
+}
 function makeGlow(pal) {
-  /* глибший і насиченіший відтінок --accent-2 (у CSS це --glow) */
-  const hsl = {}; pal.accent2.getHSL(hsl);
-  const deep = new THREE.Color().setHSL(hsl.h + 0.015, Math.min(1, hsl.s * 1.05), hsl.l * 0.72);
+  const col = glowColor(); /* світлий холодний відтінок акценту, oklch(0.70 0.10 235) */
   const mat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, toneMapped: false,
-    /* чисте додавання кольору поверх тла сторінки; альфу canvas не чіпаємо */
-    blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-    blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
+    blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     uniforms: {
-      uDeep: { value: deep.clone().convertLinearToSRGB() },
-      uCore: { value: pal.accent2.clone().convertLinearToSRGB() },
-      uK: { value: GLOW_PEAK }, uTop: { value: 10 }, uFade: { value: 1 },
+      uCol: { value: col.clone().convertLinearToSRGB() },
+      uK: { value: 1 }, uTop: { value: 10 }, uFade: { value: 1 }, uUp: { value: 1 },
+      uBand: { value: new THREE.Vector3(0, 0, 0.1) }, /* зсув центру смуги (у сторонах шолома) і її нахил */
     },
     vertexShader: /* glsl */ `
       varying vec2 vUv; varying float vY;
@@ -285,21 +299,27 @@ function makeGlow(pal) {
       }`,
     fragmentShader: /* glsl */ `
       precision highp float;
-      uniform vec3 uDeep; uniform vec3 uCore;
-      uniform float uK; uniform float uTop; uniform float uFade;
+      uniform vec3 uCol; uniform vec3 uBand;
+      uniform float uK; uniform float uTop; uniform float uFade; uniform float uUp;
       varying vec2 vUv; varying float vY;
       float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
       void main() {
-        vec2 d = (vUv - 0.5) * 2.0;
-        float r2 = dot(d, d);
-        /* Гаус + вікно, яке дає рівно нуль уже на 85 % радіуса */
-        float a = exp(-r2 * 7.0) * smoothstep(0.85, 0.35, sqrt(r2));
-        /* до центру трохи світліше, до країв — глибокий холодний тон, що тане в тлі */
-        vec3 col = mix(uDeep, uCore, exp(-r2 * 30.0) * 0.5);
+        /* координати в сторонах постера шолома, центр — шолом */
+        vec2 d = (vUv - 0.5) * vec2(${GLOW_W.toFixed(1)}, ${GLOW_H.toFixed(1)});
+        /* угору (до кнопки) Гаус стиснутий так, щоб сам дійти до нуля біля низу кнопки: без «полички» */
+        d.y *= mix(1.0, uUp, smoothstep(-0.2, 0.2, d.y));
+        float r = length(d);
+        /* пляма за шоломом: Гаус, рівно нуль на радіусі 1.0 */
+        float g1 = exp(-r * r / 0.19) * smoothstep(1.0, 0.55, r);
+        /* смуга вздовж стрічки: вузький Гаус упоперек, довгий уздовж */
+        vec2 e = d - uBand.xy;
+        float cs = cos(uBand.z), sn = sin(uBand.z);
+        e = vec2(cs * e.x + sn * e.y, -sn * e.x + cs * e.y);
+        float g2 = exp(-(e.x * e.x / 0.62 + e.y * e.y / 0.045)) * smoothstep(1.5, 0.8, abs(e.x)) * smoothstep(0.75, 0.35, abs(e.y));
+        float a = ${GLOW_PEAK.toFixed(3)} * g1 + ${GLOW_BAND.toFixed(3)} * g2 * (1.0 - 0.6 * g1);
         a *= uK * smoothstep(uTop, uTop - uFade, vY);
-        /* дизеринг проти смуг на плавному градієнті */
-        vec3 outc = col * a + (hash(gl_FragCoord.xy) - 0.5) / 255.0;
-        gl_FragColor = vec4(max(outc, 0.0), 0.0);
+        a = clamp(a + (hash(gl_FragCoord.xy) - 0.5) / 255.0 * step(0.002, a), 0.0, 1.0); /* дизеринг проти смуг */
+        gl_FragColor = vec4(uCol * a, a);
       }`,
   });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
@@ -307,22 +327,25 @@ function makeGlow(pal) {
   mesh.frustumCulled = false;
   const group = new THREE.Group();
   group.add(mesh);
-  /* справжнє світло від ореолу: ледь підсвічує стрічку за шоломом */
-  const light = new THREE.PointLight(deep, 2.4, 7, 2);
+  /* справжнє світло від ореолу: підсвічує стрічку за шоломом */
+  const light = new THREE.PointLight(col, 2.4, 7, 2);
   group.add(light);
   const f = (CAM_Z - GLOW_Z) / CAM_Z;
 
-  /* cx, cy — центр шолома в площині екрана; top — низ кнопки; k — сила (0..1) */
-  function place(cx, cy, side, shrink, t, px, py, k, top) {
-    mesh.position.set((cx - px * 0.03 * side) * f, (cy - 0.03 * side + py * 0.02 * side) * f, GLOW_Z);
-    mesh.scale.setScalar(3.1 * side * f * shrink); /* видимий ореол ≈ 2–2.5 ширини шолома */
-    mat.uniforms.uK.value = GLOW_PEAK * k * (1 + 0.06 * Math.sin(W * t));
+  /* cx, cy — центр шолома в площині екрана; top — низ кнопки; k — сила (0..1); bx, by — центр стрічки за шоломом */
+  function place(cx, cy, side, shrink, t, px, py, k, top, bx, by) {
+    const gx = cx - px * 0.03 * side, gy = cy - 0.06 * side + py * 0.02 * side;
+    mesh.position.set(gx * f, gy * f, GLOW_Z);
+    mesh.scale.set(GLOW_W * side * f * shrink, GLOW_H * side * f * shrink, 1);
+    mat.uniforms.uK.value = k * (1 + 0.05 * Math.sin(W * t));
     mat.uniforms.uTop.value = top * f;
-    mat.uniforms.uFade.value = 0.3 * side * f;
+    mat.uniforms.uFade.value = 0.1 * side * f; /* запобіжник; основне згасання дає стиснутий Гаус */
+    mat.uniforms.uUp.value = Math.max(1, 0.9 / Math.max(0.05, (top - gy) / (side * shrink)));
+    mat.uniforms.uBand.value.set((bx - gx) / side, (by - gy) / side, -0.06);
     light.position.set(cx * 1.12, (cy + 0.1 * side) * 1.12, -1.2);
     light.intensity = 2.4 * k * side * side / 3.2;
   }
-  return { group, place };
+  return { group, place, color: col };
 }
 
 /* ---------- Сцена першого екрана ---------- */
@@ -404,7 +427,8 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
   /* Розставляє все для моменту t; lift — наскільки шолом піднявся над базовою точкою. */
   function place(t, s, ease, px, py) {
     ribbon.update(t, L);
-    ribbon.mesh.position.y = -s * 0.5; /* при прокрутці стрічка йде вниз, шолом угору */
+    /* Стрічка при прокрутці не зсувається: раніше вона йшла вниз, і її лівий нижній кінець
+       виходив за нижню межу canvas. Тепер це один об'єкт, який цілком гасне разом зі сценою. */
 
     const bob = Math.sin(t * 0.9) * 0.035 * ease * state.scale;
     /* шолом піднімається рівно на ті самі 60 px, що й текст: вони йдуть разом і не наїжджають одне на одного */
@@ -420,15 +444,21 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
       helmet.rotation.z = BASE_ROT.z + Math.sin(t * 0.7 + 1.0) * 0.015 * ease;
     }
     /* Світіння за шоломом їде разом із ним і гасне при прокрутці. */
-    glow.place(state.baseX, state.baseY + lift, state.side, shrink, t, px, py, 1 - s, L.glowTop);
+    const mid = ribbon.mid();
+    /* при прокрутці світіння лишається з шоломом (трохи слабшає) і гасне разом з усією сценою */
+    const gk = 1 - 0.35 * s;
+    glow.place(state.baseX, state.baseY + lift, state.side, shrink, t, px, py, gk, L.glowTop, mid.x, mid.y);
+    ribbon.setGlow(state.baseX, mid.y, 0.95 * state.side, 0.3 * gk);
     /* Тінь на стрічці за шоломом: слабшає, коли шолом іде вгору. */
     ribbon.setShadow(state.baseX + 0.03 * state.side, state.baseY + lift - 0.1 * state.side + s * 0.8,
       0.36 * state.side, 0.22 * state.side, 0.4 * (helmet ? 1 : 0.6) * (1 - s));
   }
 
+  let held = false; /* для інструментів: кадр завмирає, цикл живий */
   function frame() {
     raf = 0;
     if (!running) return;
+    if (held) { clock.getDelta(); raf = requestAnimationFrame(frame); return; }
     const dt = Math.min(clock.getDelta(), 0.05);
     time += dt;
     layout();
@@ -486,6 +516,8 @@ export function initHero({ canvas, hero, anchor, limitEl, mobile, onFirstFrame, 
     renderer, scene, camera, rig, glow: glow.group, ribbon: ribbon.mesh,
     get running() { return running; },
     get time() { return time; },
+    /* Для інструментів (tools/): заморозити поточний кадр, не зупиняючи цикл. */
+    hold(on) { held = !!on; },
     /* Запас по глибині між найближчою точкою стрічки і найдальшою точкою шолома (одиниці сцени). */
     depthGap() { return (HELMET_Z - 0.75 * state.scale * NEAR) - ribbon.maxWorldZ(); },
     /* Для інструментів (tools/): нерухомий кадр без анімації. */

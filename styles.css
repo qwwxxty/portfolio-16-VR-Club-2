@@ -8,7 +8,7 @@
   --muted: #A1ACB9;     /* oklch(0.740 0.022 250) */
   --accent: #F38230;    /* oklch(0.720 0.165 52)  — помаранчевий анод, головна кнопка */
   --accent-2: #5BBEED;  /* oklch(0.760 0.115 232) — крижаний блік, деталі */
-  --glow: #1387D8;      /* похідний: глибший відтінок --accent-2, лише для світіння за шоломом */
+  --glow: #5AA8D4;      /* oklch(0.70 0.10 235) — похідний від --accent-2, лише для світіння за шоломом */
 
   --line: color-mix(in oklab, var(--muted) 22%, transparent);
   --line-strong: color-mix(in oklab, var(--muted) 42%, transparent);
@@ -157,16 +157,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
   transition: opacity .5s ease;
 }
 .hero__glow { /* світіння за шоломом для постера і статичного режиму; у живій сцені його малює шейдер */
-  position: absolute; z-index: 1; pointer-events: none; left: 50%; top: calc(100% - var(--helm) * 0.60);
-  width: calc(var(--helm) * 2.1); aspect-ratio: 1; transform: translate(-50%, -50%);
-  background: radial-gradient(closest-side,
-    color-mix(in oklab, color-mix(in oklab, var(--glow) 80%, var(--accent-2)) 30%, transparent) 0%,
-    color-mix(in oklab, var(--glow) 17%, transparent) 30%,
-    color-mix(in oklab, var(--glow) 5%, transparent) 58%, transparent 80%);
-  filter: blur(70px);
+  position: absolute; z-index: 1; pointer-events: none; left: 50%; top: calc(100% - var(--helm) * 0.63);
+  width: calc(var(--helm) * 3.4); height: calc(var(--helm) * 1.9); transform: translate(-50%, -50%);
+  background:
+    radial-gradient(calc(var(--helm) * 0.86) calc(var(--helm) * 0.86) at 50% 50%,
+      color-mix(in oklab, var(--glow) 56%, transparent) 0%,
+      color-mix(in oklab, var(--glow) 34%, transparent) 30%,
+      color-mix(in oklab, var(--glow) 10%, transparent) 62%, transparent 100%),
+    radial-gradient(48% 16% at 50% 52%,
+      color-mix(in oklab, var(--glow) 26%, transparent) 0%,
+      color-mix(in oklab, var(--glow) 8%, transparent) 60%, transparent 100%);
+  filter: blur(46px);
   /* зверху гасимо до нуля біля низу кнопки: кнопка і текст на чистому тлі */
-  -webkit-mask-image: linear-gradient(to bottom, transparent calc(50% - var(--helm) * 0.26), #000 calc(50% + var(--helm) * 0.08));
-  mask-image: linear-gradient(to bottom, transparent calc(50% - var(--helm) * 0.26), #000 calc(50% + var(--helm) * 0.08));
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(50% - var(--helm) * 0.20), #000 calc(50% + var(--helm) * 0.04));
+  mask-image: linear-gradient(to bottom, transparent calc(50% - var(--helm) * 0.20), #000 calc(50% + var(--helm) * 0.04));
   transition: opacity .9s ease;
 }
 .hero.is-live .hero__glow { opacity: 0; }
